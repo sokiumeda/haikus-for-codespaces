@@ -556,6 +556,11 @@ function getThresholdDays_(ss, executedFrom) {
   if (!sheet) return { value: DEFAULT_THRESHOLD_DAYS, error: null };
 
   const value = sheet.getRange(SETTINGS_ROW_THRESHOLD, 2).getValue();
+  // 空欄はNumber('')=0になってしまうため、数値変換の前に明示的に判定して既定値へ戻す
+  if (value === '' || value === null) {
+    const emptyError = [executedFrom, SHEET_SETTINGS, SETTINGS_ROW_THRESHOLD, '期限間近日数', '（空欄）', '未入力のため既定値(' + DEFAULT_THRESHOLD_DAYS + '日)を使用しました'];
+    return { value: DEFAULT_THRESHOLD_DAYS, error: emptyError };
+  }
   const num = Number(value);
   if (isFinite(num) && num >= 0) {
     return { value: num, error: null };
