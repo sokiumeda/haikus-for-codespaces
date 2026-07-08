@@ -454,29 +454,39 @@ function fillTemplateAndConvertToPdf(ss, folder, data) {
 
   SpreadsheetApp.flush(); // 差し込んだ値を確実にシートへ反映させてからPDF化する
 
-  const pdfBlob = exportSheetAsPdf(ss, sheet);
+  const pdfBlob = exportSheetAsPdf(sheet);
   const fileName = `${data.docNo}_${data.type}_${data.customer.companyName}.pdf`;
   const pdfFile = folder.createFile(pdfBlob).setName(fileName);
 
   return pdfFile.getUrl();
 }
 
-// 指定シートをPDFとしてエクスポートする（対象シートのみを出力範囲に指定）
-function exportSheetAsPdf(ss, sheet) {
-  const url = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export' +
-    '?format=pdf' +
-    '&gid=' + sheet.getSheetId() +
-    '&size=A4' +
-    '&portrait=true' +
-    '&fitw=true' +
-    '&gridlines=false' +
-    '&printtitle=false' +
-    '&sheetnames=false';
+/**
+ * 指定シートだけをPDFに変換する。
+ * ※外部サービス通信（UrlFetchApp等）は使わず、SpreadsheetApp / DriveApp の標準機能だけで実現している。
+ *   手順：①対象シートだけをコピーした一時スプレッドシートを作る → ②それをPDF化 → ③一時ファイルを削除する
+ */
+function exportSheetAsPdf(sheet) {
+  // ①対象シートのコピーを持つ、一時的なスプレッドシートを新規作成する
+  const tempSs = SpreadsheetApp.create('_tmp_帳票出力_' + new Date().getTime());
+  try {
+    const copiedSheet = sheet.copyTo(tempSs);
 
-  const response = UrlFetchApp.fetch(url, {
-    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
-  });
-  return response.getBlob();
+    // 新規作成時に自動でできる「シート1」など、コピーしたシート以外は削除する（PDFに余計なページが出ないようにするため）
+    tempSs.getSheets().forEach((s) => {
+      if (s.getSheetId() !== copiedSheet.getSheetId()) {
+        tempSs.deleteSheet(s);
+      }
+    });
+    SpreadsheetApp.flush();
+
+    // ②DriveApp標準の変換機能でPDF化する
+    const pdfBlob = DriveApp.getFileById(tempSs.getId()).getAs(MimeType.PDF);
+    return pdfBlob;
+  } finally {
+    // ③一時スプレッドシートはゴミ箱に移動して片付ける（Drive内に残り続けないようにする）
+    DriveApp.getFileById(tempSs.getId()).setTrashed(true);
+  }
 }
 
 // 「発行履歴」に1行追記する
