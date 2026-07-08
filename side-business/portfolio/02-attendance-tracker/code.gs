@@ -228,15 +228,15 @@ function runMonthlyAggregation() {
         return;
       }
 
-      let sh = Number(scheduledHours);
-      if (!scheduledHours || isNaN(sh) || sh <= 0) {
+      let sh = extractNumber_(scheduledHours);
+      if (sh === null || sh <= 0) {
         logError_(ss, SHEET_EMP, rowNumber, '所定労働時間が未入力または不正なため、8時間として計算します', '社員ID:' + id);
         sh = 8;
       }
 
       const empType = String(type || '').trim();
-      let hourlyWage = Number(wage);
-      if (empType === 'パート' && (!wage || isNaN(hourlyWage) || hourlyWage <= 0)) {
+      let hourlyWage = extractNumber_(wage);
+      if (empType === 'パート' && (hourlyWage === null || hourlyWage <= 0)) {
         logError_(ss, SHEET_EMP, rowNumber, '時給が未入力または不正なため、支給額は0円として計算します', '社員ID:' + id);
         hourlyWage = 0;
       }
@@ -377,13 +377,14 @@ function validatePunchRow_(row, empMap, settings) {
     };
   }
 
-  // 休憩時間チェック
+  // 休憩時間チェック（「60分」のように単位付きで入力されていても数値部分を読み取る）
   let breakMin = 0;
   if (breakRaw !== '' && breakRaw !== null && breakRaw !== undefined) {
-    breakMin = Number(breakRaw);
-    if (isNaN(breakMin) || breakMin < 0) {
+    const parsedBreak = extractNumber_(breakRaw);
+    if (parsedBreak === null || parsedBreak < 0) {
       return { error: '休憩時間(分)の形式が不正です', detail: detail };
     }
+    breakMin = parsedBreak;
   }
 
   // 出勤・退勤の日時を組み立てる（日またぎ対応）
@@ -397,10 +398,10 @@ function validatePunchRow_(row, empMap, settings) {
   }
 
   const shiftHours = (endDT.getTime() - startDT.getTime()) / (60 * 60 * 1000);
-  if (shiftHours > MAX_SHIFT_HOURS) {
+  if (shiftHours >= MAX_SHIFT_HOURS) {
     // 日またぎとして解釈してもなお長すぎる＝入力ミス（例：退勤時刻の入力間違い）
     return {
-      error: '退勤時刻が出勤時刻より前で、日またぎ勤務と解釈しても勤務時間が' + MAX_SHIFT_HOURS + '時間を超えるため、不正な時刻データと判断しました',
+      error: '退勤時刻が出勤時刻より前で、日またぎ勤務と解釈しても勤務時間が' + MAX_SHIFT_HOURS + '時間以上となるため、不正な時刻データと判断しました',
       detail: detail
     };
   }
@@ -549,7 +550,9 @@ function overlapMinutes_(aStart, aEnd, bStart, bEnd) {
  */
 function computeNightMinutes_(startDT, endDT, nightStartMin, nightEndMin) {
   let total = 0;
-  const cursor = new Date(startDT.getFullYear(), startDT.getMonth(), startDT.getDate());
+  // 前日22:00起点の深夜帯（〜当日5:00）と重なるケース（深夜0時台の出勤など）を
+  // 取りこぼさないよう、走査は勤務開始日の前日から始める
+  const cursor = new Date(startDT.getFullYear(), startDT.getMonth(), startDT.getDate() - 1);
   const endDay = new Date(endDT.getFullYear(), endDT.getMonth(), endDT.getDate());
 
   // 無限ループ防止のための安全装置（通常はあり得ないが念のため）
@@ -575,6 +578,20 @@ function computeNightMinutes_(startDT, endDT, nightStartMin, nightEndMin) {
 /** 分を時間(h)に変換し、小数第1位で丸める。 */
 function round1_(minutes) {
   return Math.round((minutes / 60) * 10) / 10;
+}
+
+/**
+ * セルの値から数値部分だけを読み取る（「8時間」「60分」のように単位付きで
+ * 入力された場合でも、非エンジニアの入力ミスとして処理を止めないための緩和策）。
+ * 数値が見つからない場合は null を返す。
+ */
+function extractNumber_(value) {
+  if (value === '' || value === null || value === undefined) return null;
+  if (typeof value === 'number') return value;
+  const m = String(value).trim().match(/-?\d+(\.\d+)?/);
+  if (!m) return null;
+  const n = Number(m[0]);
+  return isNaN(n) ? null : n;
 }
 
 
